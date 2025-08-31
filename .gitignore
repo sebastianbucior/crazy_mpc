@@ -167,3 +167,5 @@ rosbags/
 
 # Additional programs
 *.AppImage
+
+.vscode/
