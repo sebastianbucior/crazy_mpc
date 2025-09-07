@@ -105,7 +105,10 @@ robot_types:
       custom_topics:
         velocity: 
           frequency: 100
-          vars: ["stateEstimate.vx", "stateEstimate.vy", "stateEstimate.vz"]
+          vars: ["stateEstimateZ.vx", "stateEstimateZ.vy", "stateEstimateZ.vz"]
+        angular_velocity: 
+          frequency: 100
+          vars: ["stateEstimateZ.rateRoll", "stateEstimateZ.ratePitch", "stateEstimateZ.rateYaw"]
 
 # global settings for all robots
 all:

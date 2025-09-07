@@ -10,7 +10,7 @@ import os
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    
+    # argumenty
     crazyflie_mpc_config_yaml = os.path.join(
         get_package_share_directory('crazyflie_mpc'),
         'config',
@@ -41,21 +41,21 @@ def generate_launch_description():
     )
     crazyflie = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(crazyflie_launch_path),
-        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'False', 'rviz': 'False'}.items()
+        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'True', 'rviz': 'False'}.items()
     )
 
     # 3) MPC node
     # Uwaga: Twój kod i tak czyta n_agents z YAML; zostawiamy argument CLI, jeśli wspierasz oba.
     crazyflie_mpc_node = Node(
         package='crazyflie_mpc',
-        executable='crazyflie_multiagent_mpc_full',
+        executable='crazyflie_multiagent_mpc',
     )
 
     # Kolejność startu: SITL -> (po 3s) crazyflie -> (po kolejnych 3s) MPC
     staged = [
         GroupAction([sitl]),
-        TimerAction(period=10.0, actions=[crazyflie]),
-        TimerAction(period=12.0, actions=[crazyflie_mpc_node]),
+        TimerAction(period=15.0, actions=[crazyflie]),
+        TimerAction(period=20.0, actions=[crazyflie_mpc_node]),
     ]
 
     return LaunchDescription(staged)

@@ -28,19 +28,19 @@ class QuadrotorSimplified:
         return Rotm
     
     def dynamics(self):
-        px = SX.sym('px')
-        py = SX.sym('py')
-        pz = SX.sym('pz')
-        vx = SX.sym('vx')
-        vy = SX.sym('vy')
-        vz = SX.sym('vz')
-        roll = SX.sym('roll')
-        pitch = SX.sym('pitch')
-        yaw = SX.sym('yaw')
-        roll_c = SX.sym('roll_c')
-        pitch_c = SX.sym('pitch_c')
-        yaw_c = SX.sym('yaw_c')
-        thrust = SX.sym('thrust')
+        px = SX.sym('px')  # type: ignore
+        py = SX.sym('py')  # type: ignore
+        pz = SX.sym('pz')  # type: ignore
+        vx = SX.sym('vx')  # type: ignore
+        vy = SX.sym('vy')  # type: ignore
+        vz = SX.sym('vz')  # type: ignore
+        roll = SX.sym('roll')  # type: ignore
+        pitch = SX.sym('pitch')  # type: ignore
+        yaw = SX.sym('yaw')  # type: ignore
+        roll_c = SX.sym('roll_c')  # type: ignore
+        pitch_c = SX.sym('pitch_c')  # type: ignore
+        yaw_c = SX.sym('yaw_c')  # type: ignore
+        thrust = SX.sym('thrust')  # type: ignore
 
         # Setup state and control vectors
         x = vertcat(px,py,pz,vx,vy,vz,roll,pitch,yaw)

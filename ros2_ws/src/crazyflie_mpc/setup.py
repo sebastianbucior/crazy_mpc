@@ -25,6 +25,7 @@ setup(
     entry_points={
     'console_scripts': [
         'crazyflie_multiagent_mpc = crazyflie_mpc.crazyflie_multiagent_mpc:main',
+        'crazyflie_multiagent_mpc_full = crazyflie_mpc_full.crazyflie_multiagent_mpc_full:main',
     ],
 },
 )

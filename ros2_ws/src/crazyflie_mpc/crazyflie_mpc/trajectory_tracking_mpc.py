@@ -46,7 +46,7 @@ class TrajectoryTrackingMpc:
         ocp = AcadosOcp()
         ocp.model = model
 
-        ocp.code_export_directory = self.acados_generated_files_path / ('c_generated_code')
+        ocp.code_export_directory = (str)(self.acados_generated_files_path / ('c_generated_code'))
         nx = model.x.size()[0] # number of states
         nu = model.u.size()[0] # number of controls
         ny = nx + nu  # size of intermediate cost reference vector in least squares objective
@@ -109,6 +109,9 @@ class TrajectoryTrackingMpc:
 
 
     def solve_mpc(self, x0, yref, yref_e, solution_callback=None):
+        if self.ocp_solver is None:
+            raise RuntimeError("Solver nie jest zainicjalizowany/generowany.")
+
         if self.solver_locked:
             # print('mpc solver locked, skipping...')
             return
