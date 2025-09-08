@@ -12,7 +12,7 @@ from ament_index_python.packages import get_package_share_directory
 from crazyflie_interfaces.msg import LogDataGeneric, AttitudeSetpoint
 from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Empty
+from std_msgs.msg import Empty, Float32
 import tf_transformations
 
 import pathlib
@@ -69,6 +69,7 @@ class CrazyflieMPC(rclpy.node.Node):
         self.is_flying = False
 
         self.cnt = 0
+        self.last_u = np.ones((self.mpc_N, 4))*1962.6
         
         self.create_subscription(
             PoseStamped,
@@ -107,6 +108,11 @@ class CrazyflieMPC(rclpy.node.Node):
                     Path,
                     f'{prefix}/mpc_x0',
                     10)
+        
+        self.mpc_time_pub = self.create_publisher(
+                    Float32,
+                    f'{prefix}/mpc_time',
+                    10)
 
         self.create_timer(1./rate, self._main_loop)
         self.create_timer(1./rate, self._mpc_solver_loop)
@@ -115,8 +121,8 @@ class CrazyflieMPC(rclpy.node.Node):
         self.position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
         self.attitude = [msg.pose.orientation.w,msg.pose.orientation.x,msg.pose.orientation.y,msg.pose.orientation.z]
 
-        self.get_logger().info(f"Zapisuje: {self.cnt}")
-        self.cnt +=1
+        # self.get_logger().info(f"Zapisuje: {self.cnt}")
+        # self.cnt +=1
 
         # attitude = tf_transformations.euler_from_quaternion([msg.pose.orientation.x,
         #                                                           msg.pose.orientation.y,
@@ -212,7 +218,7 @@ class CrazyflieMPC(rclpy.node.Node):
             else:
                 pzr = self.trajectory_start_position[2] + helix_velocity*T_end
                 vzr = 0.0
-        return np.array([pxr,pyr,pzr,vxr,vyr,vzr,0.,0.,0.])
+        return np.array([pxr,pyr,pzr,1.,0.,0.,0.,vxr,vyr,vzr,0.,0.,0.])
 
     def navigator(self, t):
         if self.flight_mode == 'takeoff':
@@ -282,11 +288,17 @@ class CrazyflieMPC(rclpy.node.Node):
 
         
         t0 = self.get_clock().now().nanoseconds
-        status, x_mpc, u_mpc, rpm = self.mpc_solver.solve_mpc(x0, yref, yref_e) # type: ignore
+        status, x_mpc, u_mpc, rpm = self.mpc_solver.solve_mpc(x0, yref, yref_e, self.last_u) # type: ignore
         t1 = self.get_clock().now().nanoseconds
 
+        self.last_u = rpm
         dt_ms = (t1 - t0) / 1e6
-        # self.get_logger().info(f"MPC solve time: {dt_ms:.2f} ms")
+
+        mpc_time_msg = Float32()
+        mpc_time_msg.data = dt_ms
+        self.mpc_time_pub.publish(mpc_time_msg)
+
+        self.get_logger().info(f"MPC solve time: {dt_ms:.2f} ms")
         # self.get_logger().info(f"RPM: {rpm}")
         # self.get_logger().info(f"Control: {u_mpc}")
         # self.get_logger().info(f"State: {x_mpc}")
@@ -339,7 +351,7 @@ class CrazyflieMPC(rclpy.node.Node):
             yawrate = 0.
             self.cmd_attitude_setpoint(control[0], 
                                        control[1], 
-                                       yawrate, 
+                                       control[2], 
                                        thrust_pwm)
             # self.cmd_attitude_setpoint(2*np.pi/360., 
             #                            0., 

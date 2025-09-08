@@ -62,25 +62,25 @@ class TrajectoryTrackingMpc:
         ocp.solver_options.tf = Tf
   
         Q = np.eye(nx)
-        Q[0,0] = 10.0      # x
-        Q[1,1] = 10.0      # y
-        Q[2,2] = 10.0      # z
-        Q[3,3] = 1.0e-3     # qw
-        Q[4,4] = 1.0e-3     # qx
-        Q[5,5] = 1.0e-3     # qy
-        Q[6,6] = 1.0e-3     # qz
-        Q[7,7] = 0       # vbx
-        Q[8,8] = 0        # vby
-        Q[9,9] = 0        # vbz
-        Q[10,10] = 1e-5     # wx
-        Q[11,11] = 1e-5     # wy
-        Q[12,12] = 1e-5     # wz
+        Q[0,0] = 100.0      # x
+        Q[1,1] = 100.0      # y
+        Q[2,2] = 100.0      # z
+        Q[3,3] = 1.0e-1     # qw
+        Q[4,4] = 1.0e-1     # qx
+        Q[5,5] = 1.0e-1     # qy
+        Q[6,6] = 1.0e-1     # qz
+        Q[7,7] = 5       # vbx
+        Q[8,8] = 5        # vby
+        Q[9,9] = 2        # vbz
+        Q[10,10] = 1e-2     # wx
+        Q[11,11] = 1e-2     # wy
+        Q[12,12] = 1e-1     # wz
 
         R = np.eye(nu)
-        R[0,0] = 1e-12    # w1
-        R[1,1] = 1e-12    # w2
-        R[2,2] = 1e-12   # w3
-        R[3,3] = 1e-12    # w4
+        R[0,0] = 5e-5    # w1
+        R[1,1] = 5e-5    # w2
+        R[2,2] = 5e-5    # w3
+        R[3,3] = 5e-5    # w4
 
         W = block_diag(Q,R)
 
@@ -91,7 +91,7 @@ class TrajectoryTrackingMpc:
         ocp.cost.yref = np.zeros(ny)
 
         ocp.cost.cost_type_e = 'LINEAR_LS'
-        ocp.cost.W_e = Q
+        ocp.cost.W_e = 30*Q
         ocp.cost.Vx_e = np.vstack([np.identity(nx)])
         ocp.cost.yref_e = np.zeros(ny_e)
   
@@ -116,7 +116,7 @@ class TrajectoryTrackingMpc:
         # solver options
         ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
         ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
-        ocp.solver_options.nlp_solver_type = 'SQP'
+        ocp.solver_options.nlp_solver_type = 'SQP_RTI'
         ocp.solver_options.integrator_type = 'ERK'
         ocp.solver_options.tol = 1e-3
         ocp.solver_options.qp_tol = 1e-3
@@ -242,7 +242,7 @@ class TrajectoryTrackingMpc:
         acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
         self.ocp_solver = acados_ocp_solver_pyx.AcadosOcpSolverCython(self.model_name, 'SQP', self.num_steps)
 
-    def solve_mpc(self, x0, yref, yref_e, solution_callback=None):
+    def solve_mpc(self, x0, yref, yref_e, last_u, solution_callback=None):
         # print("Pos:", x0[:3])
         # print("Ref pos:", yref[:3,1])
 
@@ -265,19 +265,20 @@ class TrajectoryTrackingMpc:
         for i in range(N):
             self.ocp_solver.set(i, 'yref', np.array([*yref[:,i], *self.hover_control]))
             # self.ocp_solver.set(i, 'x', yref[:,i])
+            # self.ocp_solver.set(i, 'u', last_u[i,:])
             self.ocp_solver.set(i, 'u', self.hover_control)
         
         self.ocp_solver.set(N, 'yref', yref_e)
 
         x_mpc = np.zeros((N+1, nx))
         u_mpc = np.zeros((N, nu))
-        # r_mpc = np.zeros((N, nu))
+        r_mpc = np.zeros((N, nu))
         self.ocp_solver.set(0, 'lbx', x0)
         self.ocp_solver.set(0, 'ubx', x0)
         
         status = self.ocp_solver.solve()
 
-        print(f'MPC solver status: {status}')
+        # print(f'MPC solver status: {status}')
 
         # extract state and control solution from solver
         for i in range(N):
@@ -313,22 +314,43 @@ class TrajectoryTrackingMpc:
             mass = 0.0282
             motorConstant = 1.7965e-8
             thrust = motorConstant * (r1 ** 2 + r2 ** 2 + r3 ** 2 + r4 ** 2)
+
+            yaw_rate = self.ocp_solver.get(i+1, "x")[12]
+
+
+
+            q = self.ocp_solver.get(6, "x")[3:7]
+            qw, qx, qy, qz = q[0], q[1], q[2], q[3]
+            roll, pitch, yaw = tf_transformations.euler_from_quaternion([qx,
+                                                                    qy,
+                                                                    qz,
+                                                                    qw], axes='rxyz')
+            yaw_rate = self.ocp_solver.get(6, "x")[12]
+            r1, r2, r3, r4 = self.ocp_solver.get(0, "u")
+            motorConstant = 1.7965e-8
+            thrust = motorConstant * (r1 ** 2 + r2 ** 2 + r3 ** 2 + r4 ** 2)
+
             
-            u_mpc[i,:] = np.array([roll, pitch, yaw, thrust])
-            # r_mpc[i,:] = np.array([r1, r2, r3, r4])
+            u_mpc[i,:] = np.array([roll, pitch, yaw_rate, thrust])
+            r_mpc[i,:] = np.array([r1, r2, r3, r4])
+
+
+    
+
+
 
 
         x_mpc[N,:] = self.ocp_solver.get(N, "x")
 
         self.solver_locked = False
 
-        # cost_val = self.ocp_solver.get_cost()
-        # print("Objective value:", cost_val)
+        cost_val = self.ocp_solver.get_cost()
+        print("Objective value:", cost_val)
 
         if solution_callback is not None:
             solution_callback(status, x_mpc, u_mpc)
         else:    
-            return status, x_mpc, u_mpc, [r1, r2, r3, r4]
+            return status, x_mpc, u_mpc, r_mpc
         
 def main():
     crazyflie_mpc_config_yaml = os.path.join(
