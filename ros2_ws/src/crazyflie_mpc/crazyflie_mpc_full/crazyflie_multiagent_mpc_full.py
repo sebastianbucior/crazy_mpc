@@ -196,7 +196,7 @@ class CrazyflieMPC(rclpy.node.Node):
             vzr = c*omega*np.cos(omega*t)
         elif self.trajectory_type == 'lemniscate':
             a = 1.0
-            b = 0.5*np.tanh(0.1*t)
+            b = 0.8*np.tanh(0.1*t)
             pxr = self.trajectory_start_position[0] + a*np.sin(b*t)
             pyr = self.trajectory_start_position[1] + a*np.sin(b*t)*np.cos(b*t)
             pzr = self.trajectory_start_position[2]
