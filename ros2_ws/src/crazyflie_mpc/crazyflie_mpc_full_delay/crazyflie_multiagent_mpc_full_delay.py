@@ -73,19 +73,19 @@ class CrazyflieMPC(rclpy.node.Node):
         
         self.create_subscription(
             PoseStamped,
-            f'{prefix}/pose',
+            f'{prefix}/pose_d',
             self._pose_msg_callback,
             10)
         
         self.create_subscription(
             LogDataGeneric,
-            f'{prefix}/velocity',
+            f'{prefix}/velocity_d',
             self._velocity_msg_callback,
             10)
         
         self.create_subscription(
             LogDataGeneric,
-            f'{prefix}/angular_velocity',
+            f'{prefix}/angular_velocity_d',
             self._angular_velocity_msg_callback,
             10)
         
@@ -96,7 +96,7 @@ class CrazyflieMPC(rclpy.node.Node):
         
         self.attitude_setpoint_pub = self.create_publisher(
             AttitudeSetpoint,
-            f'{prefix}/cmd_attitude',
+            f'{prefix}/cmd_attitude_d',
             10)
         
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
@@ -108,6 +108,8 @@ class CrazyflieMPC(rclpy.node.Node):
                     Float32,
                     f'{prefix}/mpc_time',
                     10)
+        
+        
 
         self.create_timer(1./rate, self._main_loop)
         self.create_timer(1./rate, self._mpc_solver_loop)
@@ -256,6 +258,7 @@ class CrazyflieMPC(rclpy.node.Node):
         ])
 
         trajectory = self.navigator(t)
+        trajectory = np.array([np.array([0.,0.,0.2,1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
         yref = trajectory[:,:-1]
         yref_e = trajectory[:,-1]
 
@@ -286,6 +289,7 @@ class CrazyflieMPC(rclpy.node.Node):
                 mpc_solution_path.poses.append(mpc_pose) # type: ignore
 
             self.mpc_solution_path_pub.publish(mpc_solution_path)
+
 
         # self.cnt += 1
 
