@@ -1,5 +1,7 @@
 import os
 
+from crazyflie_interfaces.msg._reference_trajectory import ReferenceTrajectory
+
 from .quadrotor_full_model import QuadrotorFull
 from .trajectory_tracking_mpc_full import TrajectoryTrackingMpc
 
@@ -108,6 +110,14 @@ class CrazyflieMPC(rclpy.node.Node):
                     Float32,
                     f'{prefix}/mpc_time',
                     10)
+
+        self.ref_trajectory = None
+
+        self.create_subscription(
+            ReferenceTrajectory,
+            f'{prefix}/ref_trajectory',
+            self._ref_trajectory_callback,
+            10)
         
         
 
@@ -124,6 +134,16 @@ class CrazyflieMPC(rclpy.node.Node):
 
     def _angular_velocity_msg_callback(self, msg: LogDataGeneric):
         self.angular_velocity = [v / 1000.0 for v in msg.values]
+
+    def _ref_trajectory_callback(self, msg: ReferenceTrajectory):
+        # Convert list of TrajectoryPoint messages to numpy array (N+1, 13)
+        self.ref_trajectory = np.array([
+            [*traj_point.position,
+            *traj_point.orientation,
+            *traj_point.linear_velocity,
+            *traj_point.angular_velocity]
+            for traj_point in msg.points
+        ]).T
 
     def start_trajectory(self, msg):
         self.trajectory_changed = True
@@ -217,6 +237,10 @@ class CrazyflieMPC(rclpy.node.Node):
         elif self.flight_mode == 'trajectory':
             t_mpc_array = np.linspace(t, self.mpc_tf + t, self.mpc_N+1)
             yref = np.array([self.trajectory_function(t_mpc) for t_mpc in t_mpc_array]).T
+
+            yref = np.array([np.array([0.2,0.,self.trajectory_start_position[2],1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
+
+
         elif self.flight_mode == 'hover':
             yref = np.repeat(np.array([[*self.go_to_position,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.]]).T, self.mpc_N, axis=1)
         return yref
@@ -257,8 +281,9 @@ class CrazyflieMPC(rclpy.node.Node):
 
         ])
 
-        trajectory = self.navigator(t)
-        trajectory = np.array([np.array([0.,0.,0.2,1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
+        # trajectory = self.navigator(t)
+        trajectory = self.ref_trajectory
+        # trajectory = np.array([np.array([0.,0.,0.2,1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
         yref = trajectory[:,:-1]
         yref_e = trajectory[:,-1]
 
@@ -361,8 +386,8 @@ def main():
     quadrotor_dynamics = QuadrotorFull(mass, arm_length, Ixx, Iyy, Izz, cm, tau, motorConstant, momentConstant)
     acados_c_generated_code_path = pathlib.Path(get_package_share_directory('crazyflie_mpc')).resolve() / 'acados_generated_files'
     mpc_solver = TrajectoryTrackingMpc('crazyflie', quadrotor_dynamics, mpc_tf, mpc_N, code_export_directory=acados_c_generated_code_path)
-    if build_acados:
-        mpc_solver.generate_mpc()
+    # if build_acados:
+    #     mpc_solver.generate_mpc()
     nodes = [CrazyflieMPC('cf_'+str(i), mpc_solver, quadrotor_dynamics, mpc_N, mpc_tf, control_update_rate, plot_trajectory) for i in np.arange(1, 1 + n_agents)]
     executor = executors.MultiThreadedExecutor()
     for node in nodes:

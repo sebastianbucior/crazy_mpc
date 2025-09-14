@@ -28,6 +28,7 @@ setup(
         'crazyflie_multiagent_mpc_full = crazyflie_mpc_full.crazyflie_multiagent_mpc_full:main',
         'crazyflie_multiagent_mpc_full_delay = crazyflie_mpc_full_delay.crazyflie_multiagent_mpc_full_delay:main',
         'delay_relay = crazyflie_mpc_full_delay.delay_relay:main',
+        'path_planner = crazyflie_mpc_full_delay.path_planner:main',
     ],
 },
 )

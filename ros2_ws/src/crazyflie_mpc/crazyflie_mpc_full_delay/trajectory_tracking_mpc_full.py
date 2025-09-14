@@ -319,16 +319,16 @@ class TrajectoryTrackingMpc:
 
 
 
-            # q = self.ocp_solver.get(8, "x")[3:7]
-            # qw, qx, qy, qz = q[0], q[1], q[2], q[3]
-            # roll, pitch, yaw = tf_transformations.euler_from_quaternion([qx,
-            #                                                         qy,
-            #                                                         qz,
-            #                                                         qw], axes='rxyz')
-            # yaw_rate = self.ocp_solver.get(8, "x")[12]
-            # r1, r2, r3, r4 = self.ocp_solver.get(0, "u")
-            # motorConstant = 1.7965e-8
-            # thrust = motorConstant * (r1 ** 2 + r2 ** 2 + r3 ** 2 + r4 ** 2)
+            q = self.ocp_solver.get(8, "x")[3:7]
+            qw, qx, qy, qz = q[0], q[1], q[2], q[3]
+            roll, pitch, yaw = tf_transformations.euler_from_quaternion([qx,
+                                                                    qy,
+                                                                    qz,
+                                                                    qw], axes='rxyz')
+            yaw_rate = self.ocp_solver.get(8, "x")[12]
+            r1, r2, r3, r4 = self.ocp_solver.get(0, "u")
+            motorConstant = 1.7965e-8
+            thrust = motorConstant * (r1 ** 2 + r2 ** 2 + r3 ** 2 + r4 ** 2)
 
             
             u_mpc[i,:] = np.array([roll, pitch, yaw_rate, thrust])

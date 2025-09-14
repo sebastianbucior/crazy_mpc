@@ -49,6 +49,10 @@ def generate_launch_description():
         executable='delay_relay',
     )
 
+    path_planner_node = Node(
+        package='crazyflie_mpc',
+        executable='path_planner'
+    )
 
     # 4) MPC node
     # Uwaga: Twój kod i tak czyta n_agents z YAML; zostawiamy argument CLI, jeśli wspierasz oba.
@@ -62,6 +66,7 @@ def generate_launch_description():
         GroupAction([sitl]),
         TimerAction(period=15.0, actions=[crazyflie]),
         TimerAction(period=16.0, actions=[delay_relay_node]),
+        TimerAction(period=17.0, actions=[path_planner_node]),
         TimerAction(period=18.0, actions=[crazyflie_mpc_node]),
     ]
 
