@@ -101,7 +101,7 @@ robot_types:
       enabled: true
       default_topics:
         pose:
-          frequency: 10
+          frequency: 100
       custom_topics:
         velocity: 
           frequency: 100

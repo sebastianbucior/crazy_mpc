@@ -41,7 +41,7 @@ def generate_launch_description():
     )
     crazyflie = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(crazyflie_launch_path),
-        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'True', 'rviz': 'False'}.items()
+        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'False', 'rviz': 'False'}.items()
     )
 
     # 3) MPC node

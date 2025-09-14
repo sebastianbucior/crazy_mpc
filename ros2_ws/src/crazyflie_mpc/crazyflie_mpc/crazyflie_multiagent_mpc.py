@@ -106,7 +106,7 @@ class CrazyflieMPC(rclpy.node.Node):
                                                                   msg.pose.orientation.w], axes='rxyz')
 
     def _velocity_msg_callback(self, msg: LogDataGeneric):
-        self.velocity = msg.values
+        self.velocity = [v / 1000.0 for v in msg.values]
 
     def start_trajectory(self, msg):
         self.trajectory_changed = True
