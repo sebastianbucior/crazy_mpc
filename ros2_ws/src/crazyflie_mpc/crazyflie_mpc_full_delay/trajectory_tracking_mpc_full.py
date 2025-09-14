@@ -242,7 +242,7 @@ class TrajectoryTrackingMpc:
         acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
         self.ocp_solver = acados_ocp_solver_pyx.AcadosOcpSolverCython(self.model_name, 'SQP', self.num_steps)
 
-    def solve_mpc(self, x0, yref, yref_e, last_u, solution_callback=None):
+    def solve_mpc(self, x0, yref, yref_e, solution_callback=None):
         # print("Pos:", x0[:3])
         # print("Ref pos:", yref[:3,1])
 

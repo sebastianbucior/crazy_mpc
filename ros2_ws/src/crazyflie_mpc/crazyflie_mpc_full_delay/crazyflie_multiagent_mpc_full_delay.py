@@ -48,11 +48,7 @@ class CrazyflieMPC(rclpy.node.Node):
         self.angular_velocity = []
         self.attitude = []
 
-        self.trajectory_changed = True
-
         self.flight_mode = 'idle'
-        self.trajectory_t0 = self.get_clock().now()
-        self.trajectory_type = 'lemniscate'
         
         # TODO: Switch to parameters yaml?
         self.motors = Motors.MOTOR_CLASSIC # MOTOR_CLASSIC, MOTOR_UPGRADE
@@ -71,58 +67,29 @@ class CrazyflieMPC(rclpy.node.Node):
         self.is_flying = False
 
         self.cnt = 0
-        self.last_u = np.ones((self.mpc_N, 4))*1962.6
+        self.ref_trajectory = np.zeros((13, self.mpc_N + 1))
+
+
         
-        self.create_subscription(
-            PoseStamped,
-            f'{prefix}/pose_d',
-            self._pose_msg_callback,
-            10)
-        
-        self.create_subscription(
-            LogDataGeneric,
-            f'{prefix}/velocity_d',
-            self._velocity_msg_callback,
-            10)
-        
-        self.create_subscription(
-            LogDataGeneric,
-            f'{prefix}/angular_velocity_d',
-            self._angular_velocity_msg_callback,
-            10)
-        
-        self.mpc_solution_path_pub = self.create_publisher(
-            Path,
-            f'{prefix}/mpc_solution_path',
-            10)
-        
-        self.attitude_setpoint_pub = self.create_publisher(
-            AttitudeSetpoint,
-            f'{prefix}/cmd_attitude_d',
-            10)
-        
+        self.create_subscription(PoseStamped, f'{prefix}/pose_d', self._pose_msg_callback, 10)
+        self.create_subscription(LogDataGeneric, f'{prefix}/velocity_d', self._velocity_msg_callback, 10)
+        self.create_subscription(LogDataGeneric, f'{prefix}/angular_velocity_d', self._angular_velocity_msg_callback, 10)
+
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
         self.landService = self.create_subscription(Empty, f'/all/mpc_land', self.land, 10)
         self.trajectoryService = self.create_subscription(Empty, f'/all/mpc_trajectory', self.start_trajectory, 10)
         self.hoverService = self.create_subscription(Empty, f'/all/mpc_hover', self.hover, 10)
-        
-        self.mpc_time_pub = self.create_publisher(
-                    Float32,
-                    f'{prefix}/mpc_time',
-                    10)
 
-        self.ref_trajectory = None
 
-        self.create_subscription(
-            ReferenceTrajectory,
-            f'{prefix}/ref_trajectory',
-            self._ref_trajectory_callback,
-            10)
+        self.mpc_solution_path_pub = self.create_publisher(Path, f'{prefix}/mpc_solution_path', 10)
+        self.attitude_setpoint_pub = self.create_publisher(AttitudeSetpoint, f'{prefix}/cmd_attitude_d', 10)
+        self.mpc_time_pub = self.create_publisher(Float32,  f'{prefix}/mpc_time',10)
+        self.create_subscription(ReferenceTrajectory,  f'{prefix}/ref_trajectory',  self._ref_trajectory_callback, 10)
         
-        
-
         self.create_timer(1./rate, self._main_loop)
         self.create_timer(1./rate, self._mpc_solver_loop)
+
+
 
     def _pose_msg_callback(self, msg: PoseStamped):
         self.position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
@@ -136,7 +103,6 @@ class CrazyflieMPC(rclpy.node.Node):
         self.angular_velocity = [v / 1000.0 for v in msg.values]
 
     def _ref_trajectory_callback(self, msg: ReferenceTrajectory):
-        # Convert list of TrajectoryPoint messages to numpy array (N+1, 13)
         self.ref_trajectory = np.array([
             [*traj_point.position,
             *traj_point.orientation,
@@ -146,104 +112,16 @@ class CrazyflieMPC(rclpy.node.Node):
         ]).T
 
     def start_trajectory(self, msg):
-        self.trajectory_changed = True
         self.flight_mode = 'trajectory'
 
     def takeoff(self, msg):
-        self.trajectory_changed = True
         self.flight_mode = 'takeoff'
-        self.go_to_position = np.array([self.position[0],
-                                        self.position[1],
-                                        1.0])
         
     def hover(self, msg):
-        self.trajectory_changed = True
         self.flight_mode = 'hover'
-        self.go_to_position = np.array([self.position[0],
-                                        self.position[1],
-                                        self.position[2]])
 
     def land(self, msg):
-        self.trajectory_changed = True
         self.flight_mode = 'land'
-        self.go_to_position = np.array([self.position[0],
-                                        self.position[1],
-                                        0.1])
-            
-    def trajectory_function(self, t):
-        if self.trajectory_type == 'horizontal_circle':      
-            a = 1.0
-            omega = 0.75*np.tanh(0.1*t)
-            pxr = self.trajectory_start_position[0] + a*np.cos(omega*t) - a
-            pyr = self.trajectory_start_position[1] + a*np.sin(omega*t)
-            pzr = self.trajectory_start_position[2]
-            vxr = -a*omega*np.sin(omega*t)
-            vyr = a*omega*np.cos(omega*t)
-            vzr = 0.0
-        elif self.trajectory_type == 'vertical_circle':
-            a = 1.0
-            omega = 0.75*np.tanh(0.1*t)
-            pxr = self.trajectory_start_position[0] + a*np.sin(-omega*t + np.pi)
-            pyr = self.trajectory_start_position[1]
-            pzr = self.trajectory_start_position[2] + a*np.cos(-omega*t + np.pi) + a
-            vxr = -a*omega*np.cos(-omega*t + np.pi)
-            vyr = 0.0
-            vzr = a*omega*np.sin(-omega*t + np.pi)
-        elif self.trajectory_type == 'tilted_circle':
-            a = 0.5
-            c = 0.3
-            omega = 0.75*np.tanh(0.1*t)
-            pxr = self.trajectory_start_position[0] + a*np.cos(omega*t) - a
-            pyr = self.trajectory_start_position[1] + a*np.sin(omega*t)
-            pzr = self.trajectory_start_position[2] + c*np.sin(omega*t)
-            vxr = -a*omega*np.sin(omega*t)
-            vyr = a*omega*np.cos(omega*t)
-            vzr = c*omega*np.cos(omega*t)
-        elif self.trajectory_type == 'lemniscate':
-            a = 1.0
-            b = 0.8*np.tanh(0.1*t)
-            pxr = self.trajectory_start_position[0] + a*np.sin(b*t)
-            pyr = self.trajectory_start_position[1] + a*np.sin(b*t)*np.cos(b*t)
-            pzr = self.trajectory_start_position[2]
-            vxr = a*b*np.cos(b*t)
-            vyr = a*b*np.cos(2*b*t)
-            vzr = 0.0
-        elif self.trajectory_type == 'helix':
-            a = 1.0
-            T_end = 10.0
-            helix_velocity = 0.2
-            omega = 0.75*np.tanh(0.1*t)
-            pxr = self.trajectory_start_position[0] + a*np.cos(omega*t) - a
-            pyr = self.trajectory_start_position[1] + a*np.sin(omega*t)
-            vxr = -a*omega*np.sin(omega*t)
-            vyr = a*omega*np.cos(omega*t)
-            if t < T_end:
-                pzr = self.trajectory_start_position[2] + helix_velocity*t
-                vzr = helix_velocity
-            else:
-                pzr = self.trajectory_start_position[2] + helix_velocity*T_end
-                vzr = 0.0
-        return np.array([pxr,pyr,pzr,1.,0.,0.,0.,vxr,vyr,vzr,0.,0.,0.])
-
-    def navigator(self, t):
-        if self.flight_mode == 'takeoff':
-            t_mpc_array = np.linspace(t, self.mpc_tf + t, self.mpc_N+1)
-            yref = np.array([np.array([*((self.go_to_position - self.trajectory_start_position)*(1./(1. + np.exp(-(12.0 * (t_mpc - self.takeoff_duration) / self.takeoff_duration + 6.0)))) + self.trajectory_start_position),1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for t_mpc in t_mpc_array]).T
-            # yref = np.repeat(np.array([[*self.go_to_position,0,0,0]]).T, self.mpc_N, axis=1)
-        elif self.flight_mode == 'land':
-            t_mpc_array = np.linspace(t, self.mpc_tf + t, self.mpc_N+1)
-            yref = np.array([np.array([*((self.go_to_position - self.trajectory_start_position)*(1./(1. + np.exp(-(12.0 * (t_mpc - self.land_duration) / self.land_duration + 6.0)))) + self.trajectory_start_position),0.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for t_mpc in t_mpc_array]).T
-            # yref = np.repeat(np.array([[*self.go_to_position,0,0,0]]).T, self.mpc_N, axis=1)
-        elif self.flight_mode == 'trajectory':
-            t_mpc_array = np.linspace(t, self.mpc_tf + t, self.mpc_N+1)
-            yref = np.array([self.trajectory_function(t_mpc) for t_mpc in t_mpc_array]).T
-
-            yref = np.array([np.array([0.2,0.,self.trajectory_start_position[2],1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
-
-
-        elif self.flight_mode == 'hover':
-            yref = np.repeat(np.array([[*self.go_to_position,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.]]).T, self.mpc_N, axis=1)
-        return yref
     
     def cmd_attitude_setpoint(self, roll, pitch, yaw_rate, thrust_pwm):
         setpoint = AttitudeSetpoint()
@@ -262,17 +140,13 @@ class CrazyflieMPC(rclpy.node.Node):
         elif self.motors == Motors.MOTOR_UPGRADE:
             return int(max(min(24.5307*(6462.1*np.sqrt((collective_thrust / 4.0)) - 380.8359), 65535),0))
 
+
+
+
     def _mpc_solver_loop(self):
         if not self.is_flying:
             return
         
-        if self.trajectory_changed:
-            self.trajectory_start_position = self.position
-            self.trajectory_t0 = self.get_clock().now()
-            self.trajectory_changed = False
-
-        t = (self.get_clock().now() - self.trajectory_t0).nanoseconds / 10.0**9
-
         x0 = np.array([
             *self.position,
             *self.attitude,
@@ -281,7 +155,6 @@ class CrazyflieMPC(rclpy.node.Node):
 
         ])
 
-        # trajectory = self.navigator(t)
         trajectory = self.ref_trajectory
         # trajectory = np.array([np.array([0.,0.,0.2,1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
         yref = trajectory[:,:-1]
@@ -289,15 +162,15 @@ class CrazyflieMPC(rclpy.node.Node):
 
         
         t0 = self.get_clock().now().nanoseconds
-        status, x_mpc, u_mpc, rpm = self.mpc_solver.solve_mpc(x0, yref, yref_e, self.last_u) # type: ignore
+        status, x_mpc, u_mpc, rpm = self.mpc_solver.solve_mpc(x0, yref, yref_e) # type: ignore
         t1 = self.get_clock().now().nanoseconds
 
-        self.last_u = rpm
-        dt_ms = (t1 - t0) / 1e6
 
+        dt_ms = (t1 - t0) / 1e6
         mpc_time_msg = Float32()
         mpc_time_msg.data = dt_ms
         self.mpc_time_pub.publish(mpc_time_msg)
+
 
         self.control_queue = deque(u_mpc)
 
@@ -349,6 +222,7 @@ class CrazyflieMPC(rclpy.node.Node):
                                        control[1], 
                                        control[2], 
                                        thrust_pwm)
+
 
 def main():
     crazyflie_mpc_config_yaml = os.path.join(
