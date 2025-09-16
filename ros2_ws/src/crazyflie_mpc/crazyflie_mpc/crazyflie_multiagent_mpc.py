@@ -307,7 +307,7 @@ def main():
     Iyy = crazyflie_mpc_config['drone_properties']['Iyy']
     Izz = crazyflie_mpc_config['drone_properties']['Izz']
     cm = crazyflie_mpc_config['drone_properties']['cm']
-    tau = crazyflie_mpc_config['drone_properties']['attitude_time_constant']
+    tau = crazyflie_mpc_config['simple_model']['attitude_time_constant']
 
     # MPC Parameters
     mpc_tf = crazyflie_mpc_config['mpc']['horizon']

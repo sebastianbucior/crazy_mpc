@@ -1,3 +1,7 @@
+import os
+
+import yaml
+from ament_index_python import get_package_share_directory
 import rclpy, heapq, random
 from rclpy.node import Node
 from rclpy.time import Time
@@ -7,13 +11,11 @@ from crazyflie_interfaces.msg import LogDataGeneric, AttitudeSetpoint
 
 
 class DelayRelay(Node):
-    def __init__(self, cf_name: str) :
+    def __init__(self, cf_name: str, delay_ms: float, jitter_ms: float) :
         super().__init__('delay_relay')
-        self.declare_parameter('delay_ms',  0.0)   # średnie opóźnienie
-        self.declare_parameter('jitter_ms', 10.0)  # zmienność opóźnienia
 
-        self.delay_ms = self.get_parameter('delay_ms').get_parameter_value().double_value
-        self.jitter_ms = self.get_parameter('jitter_ms').get_parameter_value().double_value
+        self.delay_ms = delay_ms
+        self.jitter_ms = jitter_ms
 
         prefix = cf_name
 
@@ -61,9 +63,7 @@ class DelayRelay(Node):
         
     def _compute_delay(self):
         mu = self.delay_ms
-        sigma = self.jitter_ms
-        # jitter = random.gauss(0.0, sigma) if sigma > 0.0 else 0.0
-        jitter = 0.0
+        jitter = random.gauss(0.0, 0.3) * self.jitter_ms
         self.delay_ns = int(max(0.0, (mu + jitter)) * 1e6)
 
     def _pose_msg_callback(self, msg: PoseStamped):
@@ -113,8 +113,20 @@ class DelayRelay(Node):
             self.attitude_setpoint_pub_d.publish(msg)
 
 def main():
+    crazyflie_mpc_config_yaml = os.path.join(
+        get_package_share_directory('crazyflie_mpc'),
+        'config',
+        'mpc.yaml')
+    
+    with open(crazyflie_mpc_config_yaml, 'r') as file:
+        crazyflie_mpc_config = yaml.safe_load(file)
+
+    delay_ms = crazyflie_mpc_config['delay_relay']['delay_ms']
+    jitter_ms = crazyflie_mpc_config['delay_relay']['jitter_ms']
+
+
     rclpy.init()
-    node = DelayRelay('cf_1')
+    node = DelayRelay('cf_1', delay_ms, jitter_ms)
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

@@ -6,13 +6,28 @@ drone_properties:
   Iyy: 0.000016656
   Izz: 0.000029262
   cm: 2.4e-6
-  attitude_time_constant: 0.08
   arm_length: 0.044
   motorConstant: 1.7965e-8
-  momentConstant: 0.005964552
+  momentConstant: 9.1785e-7
   
 mpc:
   horizon: 1.0
   num_steps: 50
   control_update_rate: 50
   plot_trajectory: True
+  model_type: simple_model # full_model / simple_model
+
+simple_model:
+  attitude_time_constant: 0.08
+
+full_model:
+  kappa: 8 # defines x[kappa] to get desired angulars
+  use_predictor: false
+
+delay_relay:
+  enabled: true # todo: implement 
+  delay_ms: 10.0
+  jitter_ms: 0.0
+
+path_planner:
+  trajectory_type: "step" # "horizontal_circle", "vertical_circle", "tilted_circle", "lemniscate", "helix", "step"

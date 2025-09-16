@@ -1,5 +1,7 @@
 import os
 
+import pandas as pd
+
 from crazyflie_interfaces.msg._reference_trajectory import ReferenceTrajectory
 
 from .quadrotor_full_model import QuadrotorFull
@@ -24,13 +26,14 @@ from collections import deque
 import numpy as np
 import yaml
 import time
+from builtin_interfaces.msg import Time
 
 class Motors(Enum):
     MOTOR_CLASSIC = 1 # https://store.bitcraze.io/products/4-x-7-mm-dc-motor-pack-for-crazyflie-2 w/ standard props
     MOTOR_UPGRADE = 2 # https://store.bitcraze.io/collections/bundles/products/thrust-upgrade-bundle-for-crazyflie-2-x
 
 class CrazyflieMPC(rclpy.node.Node):
-    def __init__(self, cf_name: str, mpc_solver: TrajectoryTrackingMpc, quadrotor_dynamics: QuadrotorFull, mpc_N: int, mpc_tf: float, rate: int, plot_trajectory: bool = False):
+    def __init__(self, cf_name: str, mpc_solver: TrajectoryTrackingMpc, quadrotor_dynamics: QuadrotorFull, mpc_N: int, mpc_tf: float, rate: int, plot_trajectory: bool = False, use_predictor: bool = False) :
         super().__init__(node_name='crazyflie_mpc', namespace=cf_name)
         prefix = '/' + cf_name
         
@@ -44,6 +47,8 @@ class CrazyflieMPC(rclpy.node.Node):
         self.mpc_tf = mpc_tf
 
         self.position = []
+        self.position_stamp = Time()
+        self.used_position_stamp = Time()
         self.velocity = []
         self.angular_velocity = []
         self.attitude = []
@@ -69,11 +74,19 @@ class CrazyflieMPC(rclpy.node.Node):
         self.cnt = 0
         self.ref_trajectory = np.zeros((13, self.mpc_N + 1))
 
+        self.use_predictor = use_predictor
+        self.alpha = 0.1
+        self.latency_cnt = 0
+        self.latency_initialized = False
+        self.latency = 0.0
+        self.last_rpm = np.array([0.,0.,0.,0.])
+
 
         
         self.create_subscription(PoseStamped, f'{prefix}/pose_d', self._pose_msg_callback, 10)
         self.create_subscription(LogDataGeneric, f'{prefix}/velocity_d', self._velocity_msg_callback, 10)
         self.create_subscription(LogDataGeneric, f'{prefix}/angular_velocity_d', self._angular_velocity_msg_callback, 10)
+        self.create_subscription(LogDataGeneric, f'{prefix}/latency', self._latency_msg_callback, 10)
 
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
         self.landService = self.create_subscription(Empty, f'/all/mpc_land', self.land, 10)
@@ -90,10 +103,22 @@ class CrazyflieMPC(rclpy.node.Node):
         self.create_timer(1./rate, self._mpc_solver_loop)
 
 
+        # logging
+        self.actual_state = []
+        self.predicted_state = []
+        self.controls = []
 
     def _pose_msg_callback(self, msg: PoseStamped):
         self.position = [msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]
         self.attitude = [msg.pose.orientation.w,msg.pose.orientation.x,msg.pose.orientation.y,msg.pose.orientation.z]
+        self.position_stamp = msg.header.stamp
+        # self.get_logger().info(f"msg.header.stamp: {msg.header.stamp}")
+        # msg_stamp = rclpy.time.Time.from_msg(msg.header.stamp)
+        # now = self.get_clock().now()
+        # self.get_logger().info(f"Current time: {now.to_msg()}")
+        # stamp_diff_ms = (now.nanoseconds - msg_stamp.nanoseconds) / 1e6
+        # self.get_logger().info(f"Stamp difference (ms): {stamp_diff_ms}")
+
 
 
     def _velocity_msg_callback(self, msg: LogDataGeneric):
@@ -110,6 +135,19 @@ class CrazyflieMPC(rclpy.node.Node):
             *traj_point.angular_velocity]
             for traj_point in msg.points
         ]).T
+
+    def _latency_msg_callback(self, msg: LogDataGeneric): 
+        if not self.latency_initialized:
+            if self.latency_cnt < 10:
+                self.latency_cnt += 1
+                return
+            else:
+                self.latency = msg.values[0]
+                self.latency_initialized = True
+        else:
+            self.latency = (1.0 - self.alpha) * self.latency + self.alpha * msg.values[0]
+
+        # self.get_logger().info(f"Latency: {self.latency} ms")
 
     def start_trajectory(self, msg):
         self.flight_mode = 'trajectory'
@@ -129,6 +167,7 @@ class CrazyflieMPC(rclpy.node.Node):
         setpoint.pitch = pitch
         setpoint.yaw_rate = yaw_rate
         setpoint.thrust = thrust_pwm
+        setpoint.stamp_input = self.used_position_stamp
         self.attitude_setpoint_pub.publish(setpoint)
 
     def thrust_to_pwm(self, collective_thrust: float):
@@ -152,19 +191,29 @@ class CrazyflieMPC(rclpy.node.Node):
             *self.attitude,
             *self.velocity,
             *self.angular_velocity
-
         ])
+        self.used_position_stamp = copy(self.position_stamp)
 
         trajectory = self.ref_trajectory
-        # trajectory = np.array([np.array([0.,0.,0.2,1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
+
         yref = trajectory[:,:-1]
         yref_e = trajectory[:,-1]
 
-        
+        if self.latency_initialized and self.use_predictor:
+            self.actual_state.append(x0)
+            x = self.mpc_solver.predict_state(x0, self.last_rpm, round(self.latency) / 1000.0)
+            self.predicted_state.append(x)
+            self.controls.append(self.last_rpm)
+            x[12]=x0[12] # use measured yaw rate  # type: ignore
+
         t0 = self.get_clock().now().nanoseconds
         status, x_mpc, u_mpc, rpm = self.mpc_solver.solve_mpc(x0, yref, yref_e) # type: ignore
         t1 = self.get_clock().now().nanoseconds
 
+        # self.get_logger().info(f"MPC solve status: {status}")
+
+        self.last_rpm = rpm[0,:]
+        
 
         dt_ms = (t1 - t0) / 1e6
         mpc_time_msg = Float32()
@@ -187,19 +236,6 @@ class CrazyflieMPC(rclpy.node.Node):
                 mpc_solution_path.poses.append(mpc_pose) # type: ignore
 
             self.mpc_solution_path_pub.publish(mpc_solution_path)
-
-
-        # self.cnt += 1
-
-        # if (self.cnt == 10):
-            # self.get_logger().info(f"State: {x0}")
-            # self.get_logger().info(f"Pred state: {x_mpc[:, :3]}")
-            # self.get_logger().info(f"Thrust: {u_mpc[:, 3]}")
-            # self.cnt = 0
-
-
-        
-
 
 
     def _main_loop(self):
@@ -245,7 +281,7 @@ def main():
     Iyy = crazyflie_mpc_config['drone_properties']['Iyy']
     Izz = crazyflie_mpc_config['drone_properties']['Izz']
     cm = crazyflie_mpc_config['drone_properties']['cm']
-    tau = crazyflie_mpc_config['drone_properties']['attitude_time_constant']
+    tau = crazyflie_mpc_config['simple_model']['attitude_time_constant']
     motorConstant = crazyflie_mpc_config['drone_properties']['motorConstant']
     momentConstant = crazyflie_mpc_config['drone_properties']['momentConstant']
 
@@ -254,15 +290,17 @@ def main():
     mpc_N = crazyflie_mpc_config['mpc']['num_steps']
     control_update_rate = crazyflie_mpc_config['mpc']['control_update_rate']
     plot_trajectory = crazyflie_mpc_config['mpc']['plot_trajectory']
+    kappa = crazyflie_mpc_config['full_model']['kappa']
+    use_predictor = crazyflie_mpc_config['full_model']['use_predictor']
 
     print(f'mass: {mass}, arm_length: {arm_length}, Ixx: {Ixx}, Iyy: {Iyy}, Izz: {Izz}, cm: {cm}, tau: {tau}, mpc_tf: {mpc_tf}, mpc_N: {mpc_N}, control_update_rate: {control_update_rate}, plot_trajectory: {plot_trajectory}')
 
     quadrotor_dynamics = QuadrotorFull(mass, arm_length, Ixx, Iyy, Izz, cm, tau, motorConstant, momentConstant)
     acados_c_generated_code_path = pathlib.Path(get_package_share_directory('crazyflie_mpc')).resolve() / 'acados_generated_files'
-    mpc_solver = TrajectoryTrackingMpc('crazyflie', quadrotor_dynamics, mpc_tf, mpc_N, code_export_directory=acados_c_generated_code_path)
+    mpc_solver = TrajectoryTrackingMpc('crazyflie', quadrotor_dynamics, mpc_tf, mpc_N, kappa, code_export_directory=acados_c_generated_code_path)
     # if build_acados:
     #     mpc_solver.generate_mpc()
-    nodes = [CrazyflieMPC('cf_'+str(i), mpc_solver, quadrotor_dynamics, mpc_N, mpc_tf, control_update_rate, plot_trajectory) for i in np.arange(1, 1 + n_agents)]
+    nodes = [CrazyflieMPC('cf_'+str(i), mpc_solver, quadrotor_dynamics, mpc_N, mpc_tf, control_update_rate, plot_trajectory, use_predictor) for i in np.arange(1, 1 + n_agents)]
     executor = executors.MultiThreadedExecutor()
     for node in nodes:
         executor.add_node(node)
@@ -272,6 +310,18 @@ def main():
             executor.spin()
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard interrupt, shutting down.\n')
+
+        actual_state = np.array(nodes[0].actual_state)
+        predicted_state = np.array(nodes[0].predicted_state)
+        controls = np.array(nodes[0].controls)
+        columns = (
+            [f'actual_{i}' for i in range(actual_state.shape[1])] +
+            [f'predicted_{i}' for i in range(predicted_state.shape[1])] +
+            [f'control_{i}' for i in range(controls.shape[1])]
+        )
+        data = np.hstack([actual_state, predicted_state, controls])
+        df = pd.DataFrame(data, columns=columns)
+        df.to_csv('mpc_full_delay_states.csv', index=False)
 
     for node in nodes:
         node.destroy_node()

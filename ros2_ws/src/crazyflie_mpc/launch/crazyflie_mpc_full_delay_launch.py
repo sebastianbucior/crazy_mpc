@@ -21,7 +21,21 @@ def generate_launch_description():
     
     n_agents = str(crazyflie_mpc_config['n_agents'])
     backend        = "cflib"
-    sitl_script = "/home/sebastian/MGR/CrazySim/crazyflie-firmware/tools/crazyflie-simulation/simulator_files/gazebo/launch/sitl_multiagent_square.sh"
+
+
+    crazy_mpc_root = os.path.abspath(os.path.join(get_package_share_directory('crazyflie_mpc'), '..', '..', '..', '..', '..'))
+    sitl_script = os.path.join(
+        crazy_mpc_root,
+        'crazyflie-firmware',
+        'tools',
+        'crazyflie-simulation',
+        'simulator_files',
+        'gazebo',
+        'launch',
+        'sitl_multiagent_square.sh'
+    )
+    
+    
     crazyflies_yaml = os.path.join(
         get_package_share_directory('crazyflie_mpc'),
         'config',
@@ -64,10 +78,10 @@ def generate_launch_description():
     # Kolejność startu: SITL -> (po 3s) crazyflie -> (po kolejnych 3s) MPC
     staged = [
         GroupAction([sitl]),
-        TimerAction(period=15.0, actions=[crazyflie]),
-        TimerAction(period=16.0, actions=[delay_relay_node]),
-        TimerAction(period=17.0, actions=[path_planner_node]),
-        TimerAction(period=18.0, actions=[crazyflie_mpc_node]),
+        TimerAction(period=10.0, actions=[crazyflie]),
+        TimerAction(period=11.0, actions=[delay_relay_node]),
+        TimerAction(period=12.0, actions=[path_planner_node]),
+        TimerAction(period=13.0, actions=[crazyflie_mpc_node]),
     ]
 
     return LaunchDescription(staged)

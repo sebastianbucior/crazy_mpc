@@ -14,7 +14,7 @@ from nav_msgs.msg import Odometry, Path
 
 
 class PathPlanner(Node):
-    def __init__(self, cf_name: str, mpc_N: int, mpc_tf: float,  rate: int) :
+    def __init__(self, cf_name: str, mpc_N: int, mpc_tf: float,  rate: int, trajectory_type: str='lemniscate') :
         super().__init__('path_planner')
 
         prefix = cf_name
@@ -26,7 +26,7 @@ class PathPlanner(Node):
         self.position = [0.,0.,0.]
         self.attitude = [1.,0.,0.,0.]
 
-        self.trajectory_type = 'lemniscate'
+        self.trajectory_type =  trajectory_type
         self.flight_mode = 'idle'
         self.trajectory_changed = True
         self.trajectory_t0 = self.get_clock().now()
@@ -132,6 +132,14 @@ class PathPlanner(Node):
             else:
                 pzr = self.trajectory_start_position[2] + helix_velocity*T_end
                 vzr = 0.0
+        elif self.trajectory_type == 'step':
+            pxr = 0.2
+            pyr = 0.0
+            pzr = self.trajectory_start_position[2]
+            vxr = 0.0
+            vyr = 0.0
+            vzr = 0.0
+
         return np.array([pxr,pyr,pzr,1.,0.,0.,0.,vxr,vyr,vzr,0.,0.,0.])
 
     def navigator(self, t):
@@ -147,7 +155,7 @@ class PathPlanner(Node):
             t_mpc_array = np.linspace(t, self.mpc_tf + t, self.mpc_N+1)
             yref = np.array([self.trajectory_function(t_mpc) for t_mpc in t_mpc_array]).T
 
-            yref = np.array([np.array([0.2,0.,self.trajectory_start_position[2],1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
+            # yref = np.array([np.array([0.2,0.,self.trajectory_start_position[2],1.,0.,0.,0.,0.,0.,0.,0.,0.,0.]) for _ in range(self.mpc_N+1)]).T
 
 
         elif self.flight_mode == 'hover':
@@ -196,16 +204,16 @@ def main():
         crazyflie_mpc_config = yaml.safe_load(file)
 
     n_agents = crazyflie_mpc_config['n_agents']
-    build_acados = crazyflie_mpc_config['build_acados']
 
     mpc_tf = crazyflie_mpc_config['mpc']['horizon']
     mpc_N = crazyflie_mpc_config['mpc']['num_steps']
     control_update_rate = crazyflie_mpc_config['mpc']['control_update_rate']
+    trajectory_type = crazyflie_mpc_config['path_planner']['trajectory_type']
 
     rclpy.init()
 
-    
-    node = PathPlanner('cf_1', mpc_N, mpc_tf, control_update_rate)
+
+    node = PathPlanner('cf_1', mpc_N, mpc_tf, control_update_rate, trajectory_type)
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

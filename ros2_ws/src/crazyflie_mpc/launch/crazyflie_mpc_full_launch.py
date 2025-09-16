@@ -21,7 +21,19 @@ def generate_launch_description():
     
     n_agents = str(crazyflie_mpc_config['n_agents'])
     backend        = "cflib"
-    sitl_script = "/home/sebastian/MGR/CrazySim/crazyflie-firmware/tools/crazyflie-simulation/simulator_files/gazebo/launch/sitl_multiagent_square.sh"
+
+    crazy_mpc_root = os.path.abspath(os.path.join(get_package_share_directory('crazyflie_mpc'), '..', '..', '..', '..', '..'))
+    sitl_script = os.path.join(
+        crazy_mpc_root,
+        'crazyflie-firmware',
+        'tools',
+        'crazyflie-simulation',
+        'simulator_files',
+        'gazebo',
+        'launch',
+        'sitl_multiagent_square.sh'
+    )
+
     crazyflies_yaml = os.path.join(
         get_package_share_directory('crazyflie_mpc'),
         'config',
