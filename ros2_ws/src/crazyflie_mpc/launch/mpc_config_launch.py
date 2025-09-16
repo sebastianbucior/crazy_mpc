@@ -20,7 +20,11 @@ def generate_launch_description():
         crazyflie_mpc_config = yaml.safe_load(file)
     
     n_agents = str(crazyflie_mpc_config['n_agents'])
+    mpc_model_type = crazyflie_mpc_config['mpc']['model_type']
+    delay_relay = crazyflie_mpc_config['delay_relay']['enabled']
+
     backend        = "cflib"
+
 
     crazy_mpc_root = os.path.abspath(os.path.join(get_package_share_directory('crazyflie_mpc'), '..', '..', '..', '..', '..'))
     sitl_script = os.path.join(
@@ -33,7 +37,8 @@ def generate_launch_description():
         'launch',
         'sitl_multiagent_square.sh'
     )
-
+    
+    
     crazyflies_yaml = os.path.join(
         get_package_share_directory('crazyflie_mpc'),
         'config',
@@ -56,18 +61,40 @@ def generate_launch_description():
         launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'False', 'rviz': 'False'}.items()
     )
 
-    # 3) MPC node
-    # Uwaga: Twój kod i tak czyta n_agents z YAML; zostawiamy argument CLI, jeśli wspierasz oba.
-    crazyflie_mpc_node = Node(
+    delay_relay_node = Node(
         package='crazyflie_mpc',
-        executable='crazyflie_multiagent_mpc_full',
+        executable='delay_relay',
     )
 
-    # Kolejność startu: SITL -> (po 3s) crazyflie -> (po kolejnych 3s) MPC
+    path_planner_node = Node(
+        package='crazyflie_mpc',
+        executable='path_planner'
+    )
+
+    # 4) MPC node
+    if mpc_model_type == 'simple_model':
+        crazyflie_mpc_node = Node(
+            package='crazyflie_mpc',
+            executable='crazyflie_multiagent_mpc',
+        )
+    else:
+        crazyflie_mpc_node = Node(
+            package='crazyflie_mpc',
+            executable='crazyflie_multiagent_mpc_full',
+        )
+
+    # Kolejność startu:
     staged = [
         GroupAction([sitl]),
         TimerAction(period=10.0, actions=[crazyflie]),
-        TimerAction(period=12.0, actions=[crazyflie_mpc_node]),
     ]
+
+    if delay_relay:
+        staged.append(TimerAction(period=11.0, actions=[delay_relay_node]))
+
+    staged.extend([
+        TimerAction(period=12.0, actions=[path_planner_node]),
+        TimerAction(period=13.0, actions=[crazyflie_mpc_node]),
+    ])
 
     return LaunchDescription(staged)

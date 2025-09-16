@@ -1,6 +1,6 @@
 import os
 import pathlib
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
+from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel, AcadosSimSolver, AcadosSim
 import numpy as np
 from casadi import SX, vertcat, horzcat, diag, inv_minor, cross, sqrt,  cos, sin, norm_2, tanh, GenMX_zeros
 from scipy.linalg import block_diag
@@ -17,11 +17,12 @@ import sys
 import tf_transformations
 
 class TrajectoryTrackingMpc:
-    def __init__(self, name: str, quadrotor: QuadrotorFull, horizon: float, num_steps: int, code_export_directory : Path=Path('acados_generated_files')):
+    def __init__(self, name: str, quadrotor: QuadrotorFull, horizon: float, num_steps: int, kappa: int, code_export_directory : Path=Path('acados_generated_files')):
         self.model_name = name
         self.quad = quadrotor
         self.horizon = horizon
         self.num_steps = num_steps
+        self.kappa = kappa
         self.ocp_solver = None
         self.solver_locked = False
         self.hover_control = np.array([1962.6, 1962.6, 1962.6, 1962.6]) # [rpm]
@@ -39,10 +40,13 @@ class TrajectoryTrackingMpc:
         except ImportError:
             print('Acados cython code not generated. Generating cython code now...')
             self.generate_mpc()
-    
+
+        self.integrator = None
+        self.generate_integrator(0.02) # default dt=0.02s
+
     def __copy__(self):
-        return type(self)(self.model_name, self.quad, self.horizon, self.num_steps, self.acados_generated_files_path)
-    
+        return type(self)(self.model_name, self.quad, self.horizon, self.num_steps, self.kappa, self.acados_generated_files_path)
+
     def generate_mpc(self):
         model = self.quad.model()
 
@@ -71,16 +75,16 @@ class TrajectoryTrackingMpc:
         Q[6,6] = 1.0e-1     # qz
         Q[7,7] = 5       # vbx
         Q[8,8] = 5        # vby
-        Q[9,9] = 2        # vbz
+        Q[9,9] = 5        # vbz
         Q[10,10] = 1e-2     # wx
         Q[11,11] = 1e-2     # wy
-        Q[12,12] = 1e-1     # wz
+        Q[12,12] = 10     # wz
 
         R = np.eye(nu)
-        R[0,0] = 5e-5    # w1
-        R[1,1] = 5e-5    # w2
-        R[2,2] = 5e-5    # w3
-        R[3,3] = 5e-5    # w4
+        R[0,0] = 1e-5    # w1
+        R[1,1] = 1e-5    # w2
+        R[2,2] = 1e-5    # w3
+        R[3,3] = 1e-5    # w4
 
         W = block_diag(Q,R)
 
@@ -91,7 +95,7 @@ class TrajectoryTrackingMpc:
         ocp.cost.yref = np.zeros(ny)
 
         ocp.cost.cost_type_e = 'LINEAR_LS'
-        ocp.cost.W_e = 30*Q
+        ocp.cost.W_e = Q
         ocp.cost.Vx_e = np.vstack([np.identity(nx)])
         ocp.cost.yref_e = np.zeros(ny_e)
   
@@ -104,10 +108,10 @@ class TrajectoryTrackingMpc:
         ocp.constraints.idxbu = np.array([0,1,2,3])
 
         # max_height = 4.0
-        # x_bound = np.inf
-        # ocp.constraints.lbx = np.array([-x_bound for _ in range(nx)])
-        # ocp.constraints.ubx = np.array([+x_bound for _ in range(nx)])
-        # ocp.constraints.idxbx = np.array([0,1,2,3,4,5,6,7,8])
+        inf = np.inf
+        # ocp.constraints.lbx = np.array([-inf])
+        # ocp.constraints.ubx = np.array([])
+        # ocp.constraints.idxbx = np.array([0,1,2,3,4,5,6,7,8,9,10,11,12])
 
         # initial state
         ocp.constraints.x0 = np.array([0,0,0,1,0,0,0,0,0,0,0,0,0])
@@ -118,8 +122,8 @@ class TrajectoryTrackingMpc:
         ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
         ocp.solver_options.nlp_solver_type = 'SQP_RTI'
         ocp.solver_options.integrator_type = 'ERK'
-        ocp.solver_options.tol = 1e-3
-        ocp.solver_options.qp_tol = 1e-3
+        # ocp.solver_options.tol = 1e-3
+        # ocp.solver_options.qp_tol = 1e-3
         ocp.solver_options.nlp_solver_max_iter = 100
         ocp.solver_options.qp_solver_iter_max = 50
         ocp.solver_options.print_level = 0
@@ -133,116 +137,21 @@ class TrajectoryTrackingMpc:
         acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
         self.ocp_solver = acados_ocp_solver_pyx.AcadosOcpSolverCython(self.model_name, 'SQP', self.num_steps)
 
-    def generate_mpc_1(self):
-        model = self.quad.model()
-    
-        ocp = AcadosOcp()
-        ocp.model = model
 
-        ocp.code_export_directory = (str)(self.acados_generated_files_path / ('c_generated_code'))
-        nx = model.x.size()[0] # number of states
-        nu = model.u.size()[0] # number of controls
-        ny = nx + nu  # size of intermediate cost reference vector in least squares objective
-        ny_e = nx # size of terminal reference vector
+    def generate_integrator(self, dt):
+            model = self.quad.model()
+            sim = AcadosSim()
+            sim.model = model
 
-        N = self.num_steps
-        Tf = self.horizon
-        ocp.dims.N = N
-        ocp.solver_options.tf = Tf
+            sim.solver_options.T = dt # simulation time
+            sim.solver_options.num_steps = 1 # Make extra integrator more precise than ocp-internal integrator
+            sim.code_export_directory = str(self.acados_generated_files_path)
+            self.integrator = AcadosSimSolver(sim)
 
-        nlp_cost = ocp.cost
-        Q = np.eye(nx)
-        Q[0,0] = 100.0      # x
-        Q[1,1] = 100.0      # y
-        Q[2,2] = 100.0      # z
-        Q[3,3] = 1.0e-3     # qw
-        Q[4,4] = 1.0e-3     # qx
-        Q[5,5] = 1.0e-3     # qy
-        Q[6,6] = 1.0e-3     # qz
-        Q[7,7] = 7e-1       # vbx
-        Q[8,8] = 1.0        # vby
-        Q[9,9] = 4.0        # vbz
-        Q[10,10] = 1e-5     # wx
-        Q[11,11] = 1e-5     # wy
-        Q[12,12] = 10.0     # wz
 
-        R = np.eye(nu)
-        R[0,0] = 0.06    # w1
-        R[1,1] = 0.06    # w2
-        R[2,2] = 0.06    # w3
-        R[3,3] = 0.06    # w4
 
-        nlp_cost.W = block_diag(Q, R)
 
-        Vx = np.zeros((ny, nx))
-        Vx[0,0] = 1.0
-        Vx[1,1] = 1.0
-        Vx[2,2] = 1.0
-        Vx[3,3] = 1.0
-        Vx[4,4] = 1.0
-        Vx[5,5] = 1.0
-        Vx[6,6] = 1.0
-        Vx[7,7] = 1.0
-        Vx[8,8] = 1.0
-        Vx[9,9] = 1.0
-        Vx[10,10] = 1.0
-        Vx[11,11] = 1.0
-        Vx[12,12] = 1.0
-        nlp_cost.Vx = Vx
-
-        Vu = np.zeros((ny, nu))
-        Vu[13,0] = 1.0
-        Vu[14,1] = 1.0
-        Vu[15,2] = 1.0
-        Vu[16,3] = 1.0
-        nlp_cost.Vu = Vu
-
-        nlp_cost.W_e = Q
-
-        Vx_e = np.zeros((ny_e, nx))
-        Vx_e[0,0] = 1.0
-        Vx_e[1,1] = 1.0
-        Vx_e[2,2] = 1.0
-        Vx_e[3,3] = 1.0
-        Vx_e[4,4] = 1.0
-        Vx_e[5,5] = 1.0
-        Vx_e[6,6] = 1.0
-        Vx_e[7,7] = 1.0
-        Vx_e[8,8] = 1.0
-        Vx_e[9,9] = 1.0
-        Vx_e[10,10] = 1.0
-        Vx_e[11,11] = 1.0
-        Vx_e[12,12] = 1.0
-
-        nlp_cost.Vx_e = Vx_e
-        nlp_cost.yref   = np.array([0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        nlp_cost.yref_e = np.array([0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-
-        nlp_con = ocp.constraints
-
-        nlp_con.lbu = np.array([0,0,0,0])
-        nlp_con.ubu = np.array([+3052,+3052,+3052,+3052])
-        nlp_con.x0  = np.array([0,0,0,1,0,0,0,0,0,0,0,0,0])
-        nlp_con.idxbu = np.array([0, 1, 2, 3])
-
-        json_file = str(self.acados_generated_files_path / ('acados_ocp.json'))
-        # solver options
-        ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
-        ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
-        ocp.solver_options.nlp_solver_type = 'SQP_RTI'
-        ocp.solver_options.integrator_type = 'ERK'
-
-        ocp.solver_options.print_level = 0
-        
-        AcadosOcpSolver.generate(ocp, json_file=json_file)
-        AcadosOcpSolver.build(ocp.code_export_directory, with_cython=True)
-
-        if self.acados_generated_files_path.is_dir():
-            sys.path.append(str(self.acados_generated_files_path))
-        acados_ocp_solver_pyx = importlib.import_module('c_generated_code.acados_ocp_solver_pyx')
-        self.ocp_solver = acados_ocp_solver_pyx.AcadosOcpSolverCython(self.model_name, 'SQP', self.num_steps)
-
-    def solve_mpc(self, x0, yref, yref_e, last_u, solution_callback=None):
+    def solve_mpc(self, x0, yref, yref_e, solution_callback=None):
         # print("Pos:", x0[:3])
         # print("Ref pos:", yref[:3,1])
 
@@ -319,13 +228,13 @@ class TrajectoryTrackingMpc:
 
 
 
-            q = self.ocp_solver.get(8, "x")[3:7]
+            q = self.ocp_solver.get(self.kappa, "x")[3:7]
             qw, qx, qy, qz = q[0], q[1], q[2], q[3]
             roll, pitch, yaw = tf_transformations.euler_from_quaternion([qx,
                                                                     qy,
                                                                     qz,
                                                                     qw], axes='rxyz')
-            yaw_rate = self.ocp_solver.get(8, "x")[12]
+            yaw_rate = self.ocp_solver.get(self.kappa, "x")[12]
             r1, r2, r3, r4 = self.ocp_solver.get(0, "u")
             motorConstant = 1.7965e-8
             thrust = motorConstant * (r1 ** 2 + r2 ** 2 + r3 ** 2 + r4 ** 2)
@@ -335,22 +244,32 @@ class TrajectoryTrackingMpc:
             r_mpc[i,:] = np.array([r1, r2, r3, r4])
 
 
-    
-
-
-
-
         x_mpc[N,:] = self.ocp_solver.get(N, "x")
 
         self.solver_locked = False
 
         cost_val = self.ocp_solver.get_cost()
-        print("Objective value:", cost_val)
+        # print("Objective value:", cost_val)
 
         if solution_callback is not None:
             solution_callback(status, x_mpc, u_mpc)
         else:    
             return status, x_mpc, u_mpc, r_mpc
+        
+    def predict_state(self, x0, u0, dt):
+        if self.integrator is None:
+            raise RuntimeError("Integrator nie jest zainicjalizowany/generowany.")
+        
+        self.integrator.set('x', x0)
+        self.integrator.set('u', u0)
+        self.integrator.set('T', dt)
+        # self.integrator.set('num_steps', dt // (self.horizon / self.num_steps))
+        status = self.integrator.solve()
+        if status != 0:
+            print(f"Integrator solver failed with status {status}")
+            return x0
+        x_next = self.integrator.get('x')
+        return x_next
         
 def main():
     crazyflie_mpc_config_yaml = os.path.join(
@@ -371,7 +290,7 @@ def main():
     Iyy = crazyflie_mpc_config['drone_properties']['Iyy']
     Izz = crazyflie_mpc_config['drone_properties']['Izz']
     cm = crazyflie_mpc_config['drone_properties']['cm']
-    tau = crazyflie_mpc_config['drone_properties']['attitude_time_constant']
+    tau = crazyflie_mpc_config['simple_model']['attitude_time_constant']
     motorConstant = crazyflie_mpc_config['drone_properties']['motorConstant']
     momentConstant = crazyflie_mpc_config['drone_properties']['momentConstant']
 
@@ -390,40 +309,52 @@ def main():
         mpc_solver.generate_mpc()
 
 
-    # Generate yref for 25 steps and 13 state variables
-    num_steps = 50
+    # # Generate yref for 25 steps and 13 state variables
+    # num_steps = 50
     num_states = 13
-    yref = np.zeros((num_states, num_steps))
-    yref[2, :] = 1.0  # z position to 1 meter
-    yref[3, :] = 1.0
-    yref[0,:]=10.0  # x position to 10 meters
+    # yref = np.zeros((num_states, num_steps))
+    # yref[2, :] = 0.2  # z position to 1 meter
+    # yref[3, :] = 1.0
+    # # yref[0,:]=10.0  # x position to 10 meters
 
     x0 = np.zeros(num_states)
-    x0[2] = 1.0  # initial z position
+    x0[2] = 0.1  # initial z position
     x0[3] = 1.0  # initial qw (quaternion w)
 
-    yref_e = np.zeros(num_states)
-    yref_e[2] = 1.0
-    yref_e[3] = 1.0
-    yref_e[0] = 10.0
+    # yref_e = np.zeros(num_states)
+    # yref_e[2] = 0.2
+    # yref_e[3] = 1.0
+    # # yref_e[0] = 10.0
 
+    # start_time = time()
+    # result = mpc_solver.solve_mpc(x0, yref, yref_e, None)
+    # end_time = time()
+    # elapsed_ms = (end_time - start_time) * 1000
+    # print(f"Solve MPC execution time: {elapsed_ms:.2f} ms")
+
+    # if result is not None:
+    #     status, x_mpc, u_mpc, motors = result
+    # else:
+    #     print("MPC solver did not return a result.")
+
+
+    # print("\n\n\n RESULT:\n")
+    # print(f"Status: {status}")
+    # print(f"x_mpc: {x_mpc}")
+    # print(f"u_mpc: {u_mpc}")
+    # print(f"Motors: {motors}")
+
+    x0 = np.array([-0.00011917528900085017, 0.00014991637726780027, 0.993438184261322, 0.9999998595836894, 6.79263595496646e-05, 0.00033277493804803626, 0.0004067916566798752, 0.0, 0.0, -0.084, 0.0, -0.006, 0.0
+])
+
+    u0 = np.array([1582.8039796356306, 1584.4523788663828, 1574.9416983089973, 1573.3114988709476])
+    dt = 0.02
     start_time = time()
-    result = mpc_solver.solve_mpc(x0, yref, yref_e, None)
+    x_next = mpc_solver.predict_state(x0, u0, dt)
     end_time = time()
     elapsed_ms = (end_time - start_time) * 1000
-    print(f"Solve MPC execution time: {elapsed_ms:.2f} ms")
-
-    if result is not None:
-        status, x_mpc, u_mpc, motors = result
-    else:
-        print("MPC solver did not return a result.")
-
-
-    print("\n\n\n RESULT:\n")
-    print(f"Status: {status}")
-    print(f"x_mpc: {x_mpc}")
-    print(f"u_mpc: {u_mpc}")
-    print(f"Motors: {motors}")
+    print(f"Predict state execution time: {elapsed_ms:.2f} ms")
+    print(f"Predicted next state: {x_next}")
 
 
 if __name__ == "__main__":

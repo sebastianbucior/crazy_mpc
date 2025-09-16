@@ -20,6 +20,9 @@ class TrajectoryTrackingMpc:
         self.hover_control = np.array([0., 0., 0., self.quad.gravity*self.quad.mass])
         # self.acados_generated_files_path = Path(__file__).parent.resolve() / 'acados_generated_files'
         self.acados_generated_files_path = code_export_directory
+
+        self.generate_mpc()
+
         try:
             if self.acados_generated_files_path.is_dir():
                 sys.path.append(str(self.acados_generated_files_path))

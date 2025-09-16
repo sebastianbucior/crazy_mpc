@@ -14,7 +14,7 @@ from nav_msgs.msg import Odometry, Path
 
 
 class PathPlanner(Node):
-    def __init__(self, cf_name: str, mpc_N: int, mpc_tf: float,  rate: int, trajectory_type: str='lemniscate') :
+    def __init__(self, cf_name: str, mpc_N: int, mpc_tf: float,  rate: int, trajectory_type: str='lemniscate', delay_relay: bool=False) :
         super().__init__('path_planner')
 
         prefix = cf_name
@@ -35,8 +35,12 @@ class PathPlanner(Node):
         self.is_flying = False
 
 
+        if delay_relay:
+            self.create_subscription( PoseStamped, f'{prefix}/pose_d',self._pose_msg_callback,10)
+        else:
+            self.create_subscription( PoseStamped, f'{prefix}/pose',self._pose_msg_callback,10)
 
-        self.create_subscription( PoseStamped, f'{prefix}/pose_d',self._pose_msg_callback,10)
+
         self.takeoffService = self.create_subscription(Empty, f'/all/mpc_takeoff', self.takeoff, 10)
         self.landService = self.create_subscription(Empty, f'/all/mpc_land', self.land, 10)
         self.trajectoryService = self.create_subscription(Empty, f'/all/mpc_trajectory', self.start_trajectory, 10)
@@ -209,11 +213,11 @@ def main():
     mpc_N = crazyflie_mpc_config['mpc']['num_steps']
     control_update_rate = crazyflie_mpc_config['mpc']['control_update_rate']
     trajectory_type = crazyflie_mpc_config['path_planner']['trajectory_type']
+    delay_relay = crazyflie_mpc_config['delay_relay']['enabled']
 
     rclpy.init()
 
-
-    node = PathPlanner('cf_1', mpc_N, mpc_tf, control_update_rate, trajectory_type)
+    node = PathPlanner('cf_1', mpc_N, mpc_tf, control_update_rate, trajectory_type, delay_relay)
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
