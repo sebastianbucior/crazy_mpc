@@ -58,7 +58,7 @@ def generate_launch_description():
     )
     crazyflie = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(crazyflie_launch_path),
-        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'False', 'rviz': 'False'}.items()
+        launch_arguments={'crazyflies_yaml_file': crazyflies_yaml, 'backend': backend, 'mocap': 'False', 'gui': 'False', 'rviz': 'False', 'teleop': 'False'}.items()
     )
 
     delay_relay_node = Node(
@@ -69,6 +69,11 @@ def generate_launch_description():
     path_planner_node = Node(
         package='crazyflie_mpc',
         executable='path_planner'
+    )
+
+    data_logger_node = Node(
+        package='crazyflie_mpc',
+        executable='data_logger'
     )
 
     # 4) MPC node
@@ -95,6 +100,7 @@ def generate_launch_description():
     staged.extend([
         TimerAction(period=12.0, actions=[path_planner_node]),
         TimerAction(period=13.0, actions=[crazyflie_mpc_node]),
+        TimerAction(period=14.0, actions=[data_logger_node])
     ])
 
     return LaunchDescription(staged)

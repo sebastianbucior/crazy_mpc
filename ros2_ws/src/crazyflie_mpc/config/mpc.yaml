@@ -1,33 +1,28 @@
 n_agents: 1
-build_acados: True
+build_acados: true
 drone_properties:
   mass: 0.0282
-  Ixx: 0.000016572
-  Iyy: 0.000016656
-  Izz: 0.000029262
-  cm: 2.4e-6
+  Ixx: 1.6572e-05
+  Iyy: 1.6656e-05
+  Izz: 2.9262e-05
+  cm: 2.4e-06
   arm_length: 0.044
-  motorConstant: 1.7965e-8
-  momentConstant: 9.1785e-7
-  
+  motorConstant: 1.7965e-08
+  momentConstant: 9.1785e-07
 mpc:
   horizon: 1.0
   num_steps: 50
   control_update_rate: 50
-  plot_trajectory: True
-  model_type: simple_model # full_model / simple_model
-
+  plot_trajectory: true
+  model_type: full_model
 simple_model:
-  attitude_time_constant: 0.08
-
+  attitude_time_constant: 0.5
 full_model:
-  kappa: 8 # defines x[kappa] to get desired angulars
+  kappa: 8
   use_predictor: false
-
-delay_relay: #
+delay_relay:
   enabled: true
-  delay_ms: 0.0
-  jitter_ms: 0.0
-
+  delay_ms: 25
+  jitter_ms: 5
 path_planner:
-  trajectory_type: "step" # "horizontal_circle", "vertical_circle", "tilted_circle", "lemniscate", "helix", "step"
+  trajectory_type: step

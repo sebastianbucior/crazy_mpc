@@ -187,7 +187,7 @@ class CrazyflieMPC(rclpy.node.Node):
         t1 = self.get_clock().now().nanoseconds
 
         dt_ms = (t1 - t0) / 1e6
-        self.get_logger().info(f"MPC solve time: {dt_ms:.2f} ms")
+        # self.get_logger().info(f"MPC solve time: {dt_ms:.2f} ms")
 
         self.control_queue = deque(u_mpc)
 
